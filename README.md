@@ -14,11 +14,11 @@ flowchart LR
   Kafka --> ProductConsumer[product-restocked consumer]
 ```
 
-| Process | Role | Entrypoint |
-|---------|------|------------|
-| API | HTTP server, publishes events | `src/api/app.ts` |
-| `user-marketing-consumer` | Handles marketing consent updates | `src/consumers/user-marketing-consumer/index.ts` |
-| `product-restocked-consumer` | Handles product restock notifications | `src/consumers/product-restocked/index.ts` |
+| Process                      | Role                                  | Entrypoint                                       |
+| ---------------------------- | ------------------------------------- | ------------------------------------------------ |
+| API                          | HTTP server, publishes events         | `src/api/app.ts`                                 |
+| `user-marketing-consumer`    | Handles marketing consent updates     | `src/consumers/user-marketing-consumer/index.ts` |
+| `product-restocked-consumer` | Handles product restock notifications | `src/consumers/product-restocked/index.ts`       |
 
 In production, each process is a separate ECS service running the **same ECR image** with a different command. Locally, docker compose runs the same topology with hot reload.
 
@@ -40,10 +40,10 @@ Path aliases: `@api/*`, `@consumers/*`, `@shared/*` (see `tsconfig.json`).
 
 ## Kafka topics
 
-| Topic | Published by | Consumed by |
-|-------|--------------|-------------|
-| `user-marketing-consent` | `POST /api/user/:id/marketing-consent` | `user-marketing-consumer` |
-| `product-restocked` | `POST /api/product/:id/restock` | `product-restocked-consumer` |
+| Topic                    | Published by                           | Consumed by                  |
+| ------------------------ | -------------------------------------- | ---------------------------- |
+| `user-marketing-consent` | `POST /api/user/:id/marketing-consent` | `user-marketing-consumer`    |
+| `product-restocked`      | `POST /api/product/:id/restock`        | `product-restocked-consumer` |
 
 Topics are created on startup by the `kafka-init` compose service (`scripts/kafka/create-topics.sh`). Keep that script in sync with `src/shared/kafka/topics.ts`.
 
@@ -58,10 +58,10 @@ npm run dev        # docker compose up --build
 
 This starts the API (port 3000), both consumers, Kafka, and topic initialization.
 
-| Service | URL / notes |
-|---------|-------------|
-| API | http://localhost:3000 |
-| Kafka | `kafka:9092` inside the compose network |
+| Service | URL / notes                             |
+| ------- | --------------------------------------- |
+| API     | http://localhost:3000                   |
+| Kafka   | `kafka:9092` inside the compose network |
 
 Compose uses the Dockerfile `development` stage with bind mounts and `tsx watch` for hot reload. After adding npm packages locally, reset volumes:
 
@@ -85,14 +85,14 @@ curl -X POST http://localhost:3000/api/product/1/restock \
 
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start full stack via docker compose |
+| Command                | Description                           |
+| ---------------------- | ------------------------------------- |
+| `npm run dev`          | Start full stack via docker compose   |
 | `npm run compose:down` | Tear down compose (including volumes) |
-| `npm run compile` | TypeScript build → `dist/` |
-| `npm run lint` | ESLint |
-| `npm run test` | Vitest unit tests |
-| `npm run format` | Prettier |
+| `npm run compile`      | TypeScript build → `dist/`            |
+| `npm run lint`         | ESLint                                |
+| `npm run test`         | Vitest unit tests                     |
+| `npm run format`       | Prettier                              |
 
 ## Testing
 
@@ -103,19 +103,17 @@ Tests live in a `__tests__/` folder per deployable unit:
 
 `tsconfig.json` includes tests for editor support; `tsconfig.build.json` excludes them from production output.
 
-## CI/CD
+## Docker image stages
 
-On every push/PR to `main`:
+| Stage         | Purpose                                             |
+| ------------- | --------------------------------------------------- |
+| `development` | Local compose — source, dev deps, `tsx watch`       |
+| `build`       | Compiles TypeScript                                 |
+| `runtime`     | Production — compiled `dist/` + prod `node_modules` |
 
-- **Lint** and **test** run in parallel.
+Default `CMD` starts the API. Consumers override the command at deploy time.
 
-On push to `main` (after lint and test pass):
-
-- **Build and push** a production Docker image (`runtime` stage) to Amazon ECR, tagged with the git SHA.
-
-Required repository secrets: `AWS_ROLE_ARN`, `AWS_REGION` (OIDC auth to AWS — no long-lived access keys in the workflow).
-
-## Production
+## CI/CD / Production Pipeline
 
 See [docs/deployment.md](docs/deployment.md) for the full production picture: ECR → ECS, MSK, per-service command overrides, and configuration.
 
@@ -124,15 +122,3 @@ Quick mental model:
 ```
 GitHub Actions → ECR (one image) → ECS (api + consumer services) → MSK
 ```
-
-Compilation happens inside the Docker `build` stage — there is no separate compile job in CI.
-
-## Docker image stages
-
-| Stage | Purpose |
-|-------|---------|
-| `development` | Local compose — source, dev deps, `tsx watch` |
-| `build` | Compiles TypeScript |
-| `runtime` | Production — compiled `dist/` + prod `node_modules` |
-
-Default `CMD` starts the API. Consumers override the command at deploy time.

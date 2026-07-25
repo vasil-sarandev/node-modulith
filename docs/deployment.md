@@ -43,19 +43,6 @@ flowchart LR
 
 Each consumer lives under `src/consumers/` and maps to **one topic**. Add a new consumer when a new topic needs its own processing logic or scaling profile.
 
-Example layout (future):
-
-```
-src/
-  api/
-    app.ts
-  consumers/
-    user-events/
-      app.ts          # consumes topic: user-events
-    order-events/
-      app.ts          # consumes topic: order-events
-```
-
 ---
 
 ## Docker image
@@ -69,53 +56,20 @@ A single multi-stage `Dockerfile` produces different targets:
 | `build`        | Build intermediate    | Compiles TypeScript → `dist/`  |
 | `runtime`      | **Production**        | Production deps + `dist/` only |
 
-Build the production image (default target):
-
-```bash
-docker build -t node-modulith:local .
-```
-
-The default `CMD` starts the API:
-
-```
-node dist/api/app.js
-```
-
-Consumers use the **same image** with a **command override** at deploy time.
+Consumers use the **same image** with a **command override** both at deploy time and local development.
 
 ---
 
 ## Local development
 
-Local dev uses **docker compose**, not the `runtime` stage.
+Local dev uses **docker compose**.
 
 ```bash
 npm run dev
 # → docker compose up --build
 ```
 
-Compose builds the `development` target, bind-mounts the repo for hot reload, and preserves container `node_modules` via an anonymous volume.
-
 Each service (API, consumers, Kafka) is a separate compose service on a shared network. This mirrors production topology — multiple processes, shared infra — without being the production deployment mechanism itself.
-
-When adding a consumer locally:
-
-```yaml
-# docker-compose.yaml
-event-consumer:
-  build:
-    context: .
-    target: development
-  command: npx tsx watch src/consumers/user-events/app.ts
-  environment:
-    KAFKA_BROKERS: kafka:9092
-    KAFKA_TOPIC: user-events
-  volumes:
-    - .:/usr/src/app
-    - /usr/src/app/node_modules
-  depends_on:
-    - kafka
-```
 
 ---
 
@@ -149,8 +103,6 @@ Conceptual workflow step:
 - run: docker build -t $ECR_REGISTRY/node-modulith:$IMAGE_TAG .
 - run: docker push $ECR_REGISTRY/node-modulith:$IMAGE_TAG
 ```
-
-The workflow builds **once** and pushes **one image**. It does not start the application.
 
 ### 2. Amazon ECR (artifact registry)
 
@@ -208,45 +160,4 @@ Common variables:
 | `KAFKA_CLIENT_ID` | Consumers                          |
 | `KAFKA_GROUP_ID`  | Consumers                          |
 
-Never commit secrets. Never `COPY` env files into the production image.
-
 ---
-
-## What lives where
-
-| Concern                     | Location                                        |
-| --------------------------- | ----------------------------------------------- |
-| How to build the image      | `Dockerfile`                                    |
-| Local full-stack dev        | `docker-compose.yaml`, `npm run dev`            |
-| Compile TypeScript          | `npm run compile` (used inside Docker build)    |
-| CI build + push             | `.github/workflows/` (future)                   |
-| Prod run commands + scaling | ECS task definitions / Terraform / CDK (future) |
-| Kafka cluster               | MSK (prod), compose service (local)             |
-
-`package.json` does not define production start commands. Process entrypoints live in the Dockerfile (`CMD` default) and are overridden per service in compose (local) or ECS (production).
-
----
-
-## Adding a new consumer
-
-1. Create `src/consumers/<topic-name>/app.ts` with subscribe/handle loop and graceful shutdown.
-2. Add a compose service for local dev (`target: development`, `tsx watch`).
-3. Ensure the topic exists (local init script; prod IaC).
-4. Add an ECS service + task definition with:
-   - Same ECR image tag as API
-   - `command: ["node", "dist/consumers/<name>/index.js"]`
-   - Consumer-specific env (`KAFKA_CLIENT_ID`, `KAFKA_GROUP_ID`, `KAFKA_BROKERS`) — the topic itself is not env-driven, it's hardcoded via the `Topics` enum in the consumer's code
-5. Deploy the new ECS service independently of the API.
-
----
-
-## Testing the production image locally
-
-Build and run the `runtime` stage without compose volumes:
-
-```bash
-docker build -t node-modulith:local .
-docker run --rm -p 3000:3000 -e PORT=3000 node-modulith:local
-```
-
-This validates the same artifact CI pushes to ECR — compiled output, production dependencies, no bind mounts.
