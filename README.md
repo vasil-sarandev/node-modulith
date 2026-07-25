@@ -103,22 +103,29 @@ Tests live in a `__tests__/` folder per deployable unit:
 
 `tsconfig.json` includes tests for editor support; `tsconfig.build.json` excludes them from production output.
 
-## Docker image stages
+## Local vs. production topology
 
-| Stage         | Purpose                                             |
-| ------------- | --------------------------------------------------- |
-| `development` | Local compose — source, dev deps, `tsx watch`       |
-| `build`       | Compiles TypeScript                                 |
-| `runtime`     | Production — compiled `dist/` + prod `node_modules` |
+Same image and code, different infrastructure running it:
 
-Default `CMD` starts the API. Consumers override the command at deploy time.
+| Concern     | Local (docker compose)                                                                                                                     | Production (AWS)                                                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Processes   | `api`, `user-marketing-consumer`, `product-restocked-consumer` as separate compose services, built from the `development` Dockerfile stage | Same three processes as separate ECS services, running the `runtime` stage of the **same** ECR image with a different command each |
+| Kafka       | Single-broker `apache/kafka` container (`kafka` service), topics created on startup by `kafka-init`                                        | Managed MSK cluster                                                                                                                |
+| Networking  | One `internal-net` bridge network; services reach each other by compose service name (e.g. `kafka:9092`)                                   | ECS services on AWS networking, talking to MSK brokers                                                                             |
+| Code reload | Bind-mounted source + `tsx watch` for hot reload                                                                                           | No mounts — image is built once in CI and deployed as-is                                                                           |
 
 ## CI/CD / Production Pipeline
-
-See [docs/deployment.md](docs/deployment.md) for the full production picture: ECR → ECS, MSK, per-service command overrides, and configuration.
 
 Quick mental model:
 
 ```
 GitHub Actions → ECR (one image) → ECS (api + consumer services) → MSK
 ```
+
+On every push/PR to `main`, `.github/workflows/ci-cd.yml` runs:
+
+1. **`run-linter`** and **`run-tests`** — ESLint and the Vitest suite, in parallel.
+2. **`build-and-push-image`** — only on a push to `main` (not PRs), and only when the `DEPLOYS_ENABLED` repo variable isn't set to `false`. Builds the `runtime` stage of the Dockerfile and pushes it to ECR tagged both with the git SHA and `main`.
+3. **`deploy-to-ecs`** — fans out over a matrix of the three services (`api`, `user-marketing-consumer`, `product-restocked-consumer`). For each one it downloads the current ECS task definition, renders the new image into it, and deploys the updated task definition to the corresponding ECS service, waiting for the service to pull the image from ECR, run the container and stabilize before the job succeeds.
+
+Setting the `DEPLOYS_ENABLED` repo variable to `false` skips steps 2 and 3, so lint/test still run but no new image is built or deployed.
